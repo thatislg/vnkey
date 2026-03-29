@@ -1,11 +1,32 @@
 //! Gửi phím qua SendInput sau khi hook trả về
 //!
-//! Dùng Shift+Left để chọn và thay thế ký tự (tránh Chrome autocomplete
-//! nuốt VK_BACK). Tất cả sự kiện được đánh dấu VNKEY_INJECTED_TAG để hook bỏ qua.
+//! Mặc định dùng Shift+Left để chọn và thay thế ký tự (tránh Chrome autocomplete
+//! nuốt VK_BACK). Fallback về VK_BACK cho các app không hỗ trợ Shift+Left (WPS Office, v.v.).
+//! Tất cả sự kiện được đánh dấu VNKEY_INJECTED_TAG để hook bỏ qua.
 
 use crate::{PENDING_OUTPUT, VNKEY_INJECTED_TAG};
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use windows::Win32::UI::Input::KeyboardAndMouse::*;
+
+/// Dùng VK_BACK thay vì Shift+Left cho ứng dụng hiện tại.
+/// Được cập nhật từ hook khi detect foreground app.
+static USE_VK_BACK: AtomicBool = AtomicBool::new(false);
+
+/// Danh sách process cần dùng VK_BACK (Shift+Left không hoạt động)
+const VK_BACK_APPS: &[&str] = &[
+    "wps.exe", "wpp.exe", "et.exe",     // WPS Office
+    "WINWORD.EXE", "EXCEL.EXE", "POWERPNT.EXE", // MS Office
+];
+
+/// Kiểm tra và cập nhật phương thức backspace dựa trên ứng dụng hiện tại.
+/// Gọi từ hook mỗi lần foreground thay đổi.
+pub fn update_backspace_method() {
+    let use_vk = crate::blacklist::get_foreground_exe_cached()
+        .map(|exe| VK_BACK_APPS.iter().any(|app| app.eq_ignore_ascii_case(&exe)))
+        .unwrap_or(false);
+    USE_VK_BACK.store(use_vk, Ordering::Relaxed);
+}
 
 pub fn send_pending_output() {
     let pending = {
@@ -44,10 +65,12 @@ pub fn send_char(ascii: u8) {
     }
 }
 
-fn send_backspaces_and_text(backspaces: usize, text: &str) {
-    let mut inputs: Vec<INPUT> = Vec::new();
+/// Tạo chuỗi INPUT cho backspace: Shift+Left (select) nếu có text thay thế,
+/// hoặc VK_BACK thuần nếu không.
+fn build_backspace_inputs(inputs: &mut Vec<INPUT>, backspaces: usize, has_replacement: bool) {
+    let force_vk_back = USE_VK_BACK.load(Ordering::Relaxed);
 
-    if backspaces > 0 && !text.is_empty() {
+    if backspaces > 0 && has_replacement && !force_vk_back {
         // Dùng Shift+Left để chọn ký tự, rồi gõ văn bản thay thế.
         // Tránh VK_BACK vì Chrome Omnibox autocomplete chặn nó
         // (backspace đầu tiên xóa gợi ý thay vì xóa ký tự).
@@ -58,12 +81,17 @@ fn send_backspaces_and_text(backspaces: usize, text: &str) {
         }
         inputs.push(make_key_input(VK_SHIFT, KEYEVENTF_KEYUP, VNKEY_INJECTED_TAG));
     } else {
-        // Dự phòng: backspace thuần không có văn bản thay thế
         for _ in 0..backspaces {
             inputs.push(make_key_input(VK_BACK, KEYBD_EVENT_FLAGS(0), VNKEY_INJECTED_TAG));
             inputs.push(make_key_input(VK_BACK, KEYEVENTF_KEYUP, VNKEY_INJECTED_TAG));
         }
     }
+}
+
+fn send_backspaces_and_text(backspaces: usize, text: &str) {
+    let mut inputs: Vec<INPUT> = Vec::new();
+
+    build_backspace_inputs(&mut inputs, backspaces, !text.is_empty());
 
     // Văn bản dưới dạng ký tự Unicode (KEYEVENTF_UNICODE)
     // Nếu đang chọn văn bản từ Shift+Left, thao tác này thay thế vùng chọn.
@@ -82,19 +110,7 @@ fn send_backspaces_and_text(backspaces: usize, text: &str) {
 fn send_backspaces_and_raw(backspaces: usize, raw_bytes: &[u8]) {
     let mut inputs: Vec<INPUT> = Vec::new();
 
-    if backspaces > 0 && !raw_bytes.is_empty() {
-        inputs.push(make_key_input(VK_SHIFT, KEYBD_EVENT_FLAGS(0), VNKEY_INJECTED_TAG));
-        for _ in 0..backspaces {
-            inputs.push(make_key_input(VK_LEFT, KEYEVENTF_EXTENDEDKEY, VNKEY_INJECTED_TAG));
-            inputs.push(make_key_input(VK_LEFT, KEYBD_EVENT_FLAGS(KEYEVENTF_KEYUP.0 | KEYEVENTF_EXTENDEDKEY.0), VNKEY_INJECTED_TAG));
-        }
-        inputs.push(make_key_input(VK_SHIFT, KEYEVENTF_KEYUP, VNKEY_INJECTED_TAG));
-    } else {
-        for _ in 0..backspaces {
-            inputs.push(make_key_input(VK_BACK, KEYBD_EVENT_FLAGS(0), VNKEY_INJECTED_TAG));
-            inputs.push(make_key_input(VK_BACK, KEYEVENTF_KEYUP, VNKEY_INJECTED_TAG));
-        }
-    }
+    build_backspace_inputs(&mut inputs, backspaces, !raw_bytes.is_empty());
 
     for &b in raw_bytes {
         inputs.push(make_unicode_input(b as u16, KEYBD_EVENT_FLAGS(0), VNKEY_INJECTED_TAG));

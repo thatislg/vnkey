@@ -40,6 +40,18 @@ pub enum KeyEvType {
     Normal,
 }
 
+impl KeyEvType {
+    /// An toàn: chuyển u8 sang KeyEvType, trả về Normal nếu ngoài phạm vi
+    pub fn from_u8(v: u8) -> Self {
+        if v <= KeyEvType::Normal as u8 {
+            // SAFETY: repr(u8), các variant liên tục 0..=Normal, đã kiểm tra biên
+            unsafe { std::mem::transmute(v) }
+        } else {
+            KeyEvType::Normal
+        }
+    }
+}
+
 /// Phân loại ký tự
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CharType {
@@ -239,11 +251,11 @@ impl InputProcessor {
 
         if ev_action >= KeyEvType::Tone0 as i32 && ev_action <= KeyEvType::Tone5 as i32 {
             tone = ev_action - KeyEvType::Tone0 as i32;
-            ev_type = unsafe { std::mem::transmute(ev_action as u8) };
+            ev_type = KeyEvType::from_u8(ev_action as u8);
             vn_sym = iso_to_vn_lexi(key_code);
         } else if ev_action >= VNE_COUNT {
             // Ánh xạ ký tự: action chứa mã VnLexiName
-            let mapped_sym = unsafe { std::mem::transmute((ev_action - VNE_COUNT) as i16) };
+            let mapped_sym = VnLexiName::from_i16((ev_action - VNE_COUNT) as i16);
             ev_type = KeyEvType::MapChar;
             vn_sym = mapped_sym;
             return KeyEvent {
@@ -254,7 +266,7 @@ impl InputProcessor {
                 tone,
             };
         } else {
-            ev_type = unsafe { std::mem::transmute(ev_action as u8) };
+            ev_type = KeyEvType::from_u8(ev_action as u8);
             vn_sym = iso_to_vn_lexi(key_code);
         }
 

@@ -85,7 +85,7 @@ public:
     void reset();
 
 private:
-    void commitPreedit();
+    void commitPreedit(bool soft = false);
     void syncSettings();
 
     VnKeyEngine *engine_;

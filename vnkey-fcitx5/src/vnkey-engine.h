@@ -33,6 +33,9 @@ int vnkey_engine_backspace(VnKeyEngine *engine,
 /* Đặt lại trạng thái engine (vd: khi đổi focus) */
 void vnkey_engine_reset(VnKeyEngine *engine);
 
+/* Đặt lại mềm: lưu trạng thái để backspace có thể khôi phục */
+void vnkey_engine_soft_reset(VnKeyEngine *engine);
+
 /* Đặt kiểu gõ: 0=Telex, 1=SimpleTelex, 2=VNI, 3=VIQR, 4=MsVi */
 void vnkey_engine_set_input_method(VnKeyEngine *engine, int method);
 

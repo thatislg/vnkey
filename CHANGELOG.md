@@ -1,5 +1,36 @@
 # Changelog
 
+## 1.0.1 — 2026-03-29
+
+### vnkey-engine
+- Sửa lỗi UB (undefined behavior) do transmute không kiểm tra biên — thay bằng `from_u8`/`from_i16` an toàn
+- Sửa sentinel -1 trong buffer — thêm `debug_assert` kiểm tra bounds
+- Implement `auto_non_vn_restore`: tự khôi phục phím gốc khi từ không phải tiếng Việt (vd: gõ "services" không còn bị thành "sẻvices")
+- Thêm `soft_reset()` public + FFI: lưu trạng thái để backspace sau dấu cách có thể khôi phục dấu
+- Xóa method `buf_mut` không sử dụng
+
+### vnkey-windows
+- Sửa blocking mutex: `ENGINE.lock()` → `ENGINE.try_lock()` trong keyboard hook
+- Sửa hardcoded bàn phím US — dùng `ToUnicode` API hỗ trợ mọi layout
+- Sửa phím tắt Win+D không hoạt động — thêm xử lý VK_LWIN/VK_RWIN
+- Sửa Facebook chat/comment không nhận dấu khi click lần đầu — thêm `GetGUIThreadInfo` theo dõi focus
+- Sửa WPS Office hiện ký tự đôi ("chàoao") — thêm phương thức backspace riêng cho ứng dụng không hỗ trợ Shift+Left
+- Trích xuất `build_backspace_inputs()` helper giảm code trùng lặp
+- Space dùng `soft_reset` thay vì `reset` để hỗ trợ backspace khôi phục dấu
+
+### vnkey-fcitx5
+- Sửa `saveConfig` dùng `std::system("mkdir -p")` — thay bằng `std::filesystem::create_directories()`
+- Space dùng `vnkey_engine_soft_reset` thay vì `vnkey_engine_reset`
+
+### vnkey-ibus
+- Space dùng `vnkey_engine_soft_reset` thay vì `vnkey_engine_reset`
+
+### Chung
+- Thêm `flake.nix` hỗ trợ NixOS (Fcitx5 & IBus)
+- Cập nhật README hướng dẫn cài đặt NixOS chi tiết
+
+---
+
 ## 1.0.0 — 2026-03-29
 
 Phiên bản đầu tiên phát hành công khai.

@@ -53,11 +53,21 @@ pub enum VnLexiName {
 use VnLexiName::*;
 
 impl VnLexiName {
+    /// An toàn: chuyển i16 sang VnLexiName, trả về NonVnChar nếu ngoài phạm vi
+    pub fn from_i16(val: i16) -> Self {
+        if val >= VnLexiName::NonVnChar as i16 && val < VnLexiName::LastChar as i16 {
+            // SAFETY: repr(i16), variant liên tục -1..LastChar, đã kiểm tra biên
+            unsafe { std::mem::transmute(val) }
+        } else {
+            VnLexiName::NonVnChar
+        }
+    }
+
     pub fn to_lower(self) -> Self {
         if self == NonVnChar { return self; }
         let val = self as i16;
         if val & 1 == 0 { // chẵn = chữ hoa
-            unsafe { std::mem::transmute(val + 1) }
+            VnLexiName::from_i16(val + 1)
         } else {
             self
         }
@@ -67,7 +77,7 @@ impl VnLexiName {
         if self == NonVnChar { return self; }
         let val = self as i16;
         if val & 1 == 1 { // lẻ = chữ thường
-            unsafe { std::mem::transmute(val - 1) }
+            VnLexiName::from_i16(val - 1)
         } else {
             self
         }
@@ -77,9 +87,9 @@ impl VnLexiName {
         if self == NonVnChar { return self; }
         let val = self as i16;
         if val & 1 == 0 { // chẵn = chữ hoa → chữ thường
-            unsafe { std::mem::transmute(val + 1) }
+            VnLexiName::from_i16(val + 1)
         } else {
-            unsafe { std::mem::transmute(val - 1) }
+            VnLexiName::from_i16(val - 1)
         }
     }
 
@@ -202,6 +212,16 @@ pub enum VowelSeq {
     VS_YEU, VS_YERU,
 }
 
+impl VowelSeq {
+    pub fn from_i16(val: i16) -> Self {
+        if val >= VowelSeq::Nil as i16 && val <= VowelSeq::VS_YERU as i16 {
+            unsafe { std::mem::transmute(val) }
+        } else {
+            VowelSeq::Nil
+        }
+    }
+}
+
 use VowelSeq::*;
 
 // ============= Chuỗi phụ âm =============
@@ -220,6 +240,16 @@ pub enum ConSeq {
     CS_Q, CS_QU,
     CS_R, CS_S, CS_T, CS_TH, CS_TR,
     CS_V, CS_X,
+}
+
+impl ConSeq {
+    pub fn from_i16(val: i16) -> Self {
+        if val >= ConSeq::Nil as i16 && val <= ConSeq::CS_X as i16 {
+            unsafe { std::mem::transmute(val) }
+        } else {
+            ConSeq::Nil
+        }
+    }
 }
 
 use ConSeq::*;
@@ -406,7 +436,7 @@ pub static VC_PAIR_LIST: &[(VowelSeq, ConSeq)] = &[
 pub fn lookup_vseq(v1: VnLexiName, v2: VnLexiName, v3: VnLexiName) -> VowelSeq {
     for (idx, info) in VSEQ_LIST.iter().enumerate() {
         if info.v[0] == v1 && info.v[1] == v2 && info.v[2] == v3 {
-            return unsafe { std::mem::transmute(idx as i16) };
+            return VowelSeq::from_i16(idx as i16);
         }
     }
     VowelSeq::Nil
@@ -426,7 +456,7 @@ pub fn lookup_vseq2(v1: VnLexiName, v2: VnLexiName) -> VowelSeq {
 pub fn lookup_cseq(c1: VnLexiName, c2: VnLexiName, c3: VnLexiName) -> ConSeq {
     for (idx, info) in CSEQ_LIST.iter().enumerate() {
         if info.c[0] == c1 && info.c[1] == c2 && info.c[2] == c3 {
-            return unsafe { std::mem::transmute(idx as i16) };
+            return ConSeq::from_i16(idx as i16);
         }
     }
     ConSeq::Nil

@@ -13,6 +13,8 @@ static HOOK_RAW: AtomicIsize = AtomicIsize::new(0);
 static MAIN_THREAD_ID: AtomicU32 = AtomicU32::new(0);
 /// Theo dõi cửa sổ nền để phát hiện thay đổi focus
 static LAST_FOREGROUND: AtomicIsize = AtomicIsize::new(0);
+/// Theo dõi focus element (child window) để phát hiện click vào ô khác trong cùng cửa sổ
+static LAST_FOCUS: AtomicIsize = AtomicIsize::new(0);
 /// Đặt sau Ctrl+Shift toggle để bỏ qua chu kỳ keyup tiếp theo
 static JUST_TOGGLED: AtomicBool = AtomicBool::new(false);
 
@@ -73,22 +75,43 @@ unsafe extern "system" fn ll_keyboard_proc(
         return call_next(code, wparam, lparam);
     }
 
-    // Đặt lại engine khi cửa sổ nền thay đổi (chuyển tab/ứng dụng)
+    // Đặt lại engine khi cửa sổ nền hoặc focus element thay đổi
+    // (ví dụ: click vào ô chat/comment khác trong cùng trình duyệt)
     {
         let fg = GetForegroundWindow().0 as isize;
-        let prev = LAST_FOREGROUND.swap(fg, Ordering::Relaxed);
-        if fg != prev && prev != 0 {
-            if let Ok(mut guard) = ENGINE.lock() {
+        let prev_fg = LAST_FOREGROUND.swap(fg, Ordering::Relaxed);
+
+        // Lấy focus element qua GetGUIThreadInfo (hoạt động từ thread khác,
+        // không cần AttachThreadInput như GetFocus)
+        let mut gui_info: GUITHREADINFO = std::mem::zeroed();
+        gui_info.cbSize = std::mem::size_of::<GUITHREADINFO>() as u32;
+        let focus_hwnd = if GetGUIThreadInfo(0, &mut gui_info).is_ok() {
+            gui_info.hwndFocus.0 as isize
+        } else {
+            0
+        };
+        let prev_focus = LAST_FOCUS.swap(focus_hwnd, Ordering::Relaxed);
+
+        let focus_changed = (fg != prev_fg && prev_fg != 0)
+            || (focus_hwnd != 0 && focus_hwnd != prev_focus);
+        if focus_changed {
+            if let Ok(mut guard) = ENGINE.try_lock() {
                 if let Some(state) = guard.as_mut() {
                     state.engine.reset();
                 }
             }
+            // Cập nhật phương thức backspace cho app mới (Shift+Left vs VK_BACK)
+            if fg != prev_fg {
+                crate::send::update_backspace_method();
+            }
         }
     }
 
-    // Bỏ qua phím có Ctrl hoặc Alt (phím tắt)
+    // Bỏ qua phím có Ctrl, Alt hoặc Win (phím tắt hệ thống)
     let ctrl = GetAsyncKeyState(VK_CONTROL.0 as i32) as u16 & 0x8000 != 0;
     let alt = GetAsyncKeyState(VK_MENU.0 as i32) as u16 & 0x8000 != 0;
+    let win = GetAsyncKeyState(VK_LWIN.0 as i32) as u16 & 0x8000 != 0
+           || GetAsyncKeyState(VK_RWIN.0 as i32) as u16 & 0x8000 != 0;
 
     // Ctrl+Shift: bật/tắt tiếng Việt (chỉ khi dùng toggle mặc định, không phải hotkey tùy chỉnh)
     // Hook cấp thấp nhận VK_LSHIFT (0xA0) hoặc VK_RSHIFT (0xA1), không phải VK_SHIFT (0x10)
@@ -96,7 +119,7 @@ unsafe extern "system" fn ll_keyboard_proc(
         || kb.vkCode == VK_LSHIFT.0 as u32
         || kb.vkCode == VK_RSHIFT.0 as u32;
     if ctrl && is_shift && crate::hotkey::is_toggle_builtin() {
-        if let Ok(mut guard) = ENGINE.lock() {
+        if let Ok(mut guard) = ENGINE.try_lock() {
             if let Some(state) = guard.as_mut() {
                 state.toggle_viet_mode();
                 let vm = state.viet_mode;
@@ -117,6 +140,7 @@ unsafe extern "system" fn ll_keyboard_proc(
         || kb.vkCode == VK_LSHIFT.0 as u32 || kb.vkCode == VK_RSHIFT.0 as u32
         || kb.vkCode == VK_MENU.0 as u32 || kb.vkCode == VK_LMENU.0 as u32
         || kb.vkCode == VK_RMENU.0 as u32
+        || kb.vkCode == VK_LWIN.0 as u32 || kb.vkCode == VK_RWIN.0 as u32
     {
         return call_next(code, wparam, lparam);
     }
@@ -124,12 +148,12 @@ unsafe extern "system" fn ll_keyboard_proc(
     // Xóa cờ toggle khi gặp phím thực
     let was_toggled = JUST_TOGGLED.swap(false, Ordering::Relaxed);
 
-    if ctrl || alt {
+    if ctrl || alt || win {
         // Nếu vừa toggle và Ctrl vẫn giữ ảo, bỏ qua
-        if was_toggled && ctrl && !alt {
+        if was_toggled && ctrl && !alt && !win {
             // Tiếp tục xử lý phím bình thường
         } else {
-            if let Ok(mut guard) = ENGINE.lock() {
+            if let Ok(mut guard) = ENGINE.try_lock() {
                 if let Some(state) = guard.as_mut() {
                     state.engine.reset();
                 }
@@ -140,12 +164,21 @@ unsafe extern "system" fn ll_keyboard_proc(
 
     let vk = kb.vkCode;
 
-    // Xử lý phím đặc biệt: reset engine khi Enter, Escape, Tab, Space
+    // Xử lý phím đặc biệt: reset engine khi Enter, Escape, Tab; soft reset khi Space
     match VIRTUAL_KEY(vk as u16) {
-        VK_RETURN | VK_ESCAPE | VK_TAB | VK_SPACE => {
-            if let Ok(mut guard) = ENGINE.lock() {
+        VK_RETURN | VK_ESCAPE | VK_TAB => {
+            if let Ok(mut guard) = ENGINE.try_lock() {
                 if let Some(state) = guard.as_mut() {
                     state.engine.reset();
+                }
+            }
+            return call_next(code, wparam, lparam);
+        }
+        VK_SPACE => {
+            // Soft reset: lưu trạng thái để backspace sau dấu cách có thể khôi phục
+            if let Ok(mut guard) = ENGINE.try_lock() {
+                if let Some(state) = guard.as_mut() {
+                    state.engine.soft_reset();
                 }
             }
             return call_next(code, wparam, lparam);
@@ -161,7 +194,7 @@ unsafe extern "system" fn ll_keyboard_proc(
     // Chuyển mã VK sang ký tự ASCII có xét trạng thái Shift
     let ascii = vk_to_ascii(vk, kb.scanCode);
     if ascii == 0 {
-        if let Ok(mut guard) = ENGINE.lock() {
+        if let Ok(mut guard) = ENGINE.try_lock() {
             if let Some(state) = guard.as_mut() {
                 state.engine.reset();
             }
@@ -174,7 +207,7 @@ unsafe extern "system" fn ll_keyboard_proc(
     // Đảm bảo mọi ký tự trong trường văn bản đều từ cùng
     // một đường (SendInput), nên VK_BACK có thể xóa đúng.
     // Sửa lỗi thanh địa chỉ Chrome và các trường autocomplete khác.
-    if let Ok(mut guard) = ENGINE.lock() {
+    if let Ok(mut guard) = ENGINE.try_lock() {
         if let Some(state) = guard.as_mut() {
             state.sync_options();
             let result = state.engine.process(ascii as u32);
@@ -204,7 +237,7 @@ unsafe fn handle_backspace(
     lparam: LPARAM,
 ) -> LRESULT {
     let mut send_data: Option<(usize, String, Option<Vec<u8>>)> = None;
-    if let Ok(mut guard) = ENGINE.lock() {
+    if let Ok(mut guard) = ENGINE.try_lock() {
         if let Some(state) = guard.as_mut() {
             let result = state.engine.process_backspace();
 
@@ -226,68 +259,29 @@ unsafe fn handle_backspace(
 }
 
 /// Chuyển mã phím ảo sang ký tự ASCII
-/// Có xét trạng thái Shift và CapsLock
-unsafe fn vk_to_ascii(vk: u32, _scan_code: u32) -> u8 {
+/// Dùng ToUnicode API để hỗ trợ mọi bố cục bàn phím (AZERTY, QWERTZ, v.v.)
+unsafe fn vk_to_ascii(vk: u32, scan_code: u32) -> u8 {
     let shift = GetAsyncKeyState(VK_SHIFT.0 as i32) as u16 & 0x8000 != 0;
     let caps = GetKeyState(VK_CAPITAL.0 as i32) & 1 != 0;
     let upper = shift ^ caps;
 
-    // Phím chữ (VK_A=0x41 đến VK_Z=0x5A)
+    // Phím chữ (VK_A=0x41 đến VK_Z=0x5A): giống nhau trên mọi layout
     if (0x41..=0x5A).contains(&vk) {
         return if upper { vk as u8 } else { vk as u8 + 32 };
     }
 
-    // Phím số (VK_0=0x30 đến VK_9=0x39)
-    if (0x30..=0x39).contains(&vk) {
-        if shift {
-            return match vk {
-                0x30 => b')',
-                0x31 => b'!',
-                0x32 => b'@',
-                0x33 => b'#',
-                0x34 => b'$',
-                0x35 => b'%',
-                0x36 => b'^',
-                0x37 => b'&',
-                0x38 => b'*',
-                0x39 => b'(',
-                _ => 0,
-            };
-        }
-        return vk as u8;
-    }
-
-    // Phím OEM
+    // Các phím còn lại: dùng ToUnicode để tra theo layout thực tế
+    let mut key_state = [0u8; 256];
     if shift {
-        match VIRTUAL_KEY(vk as u16) {
-            VK_OEM_1 => return b':',
-            VK_OEM_PLUS => return b'+',
-            VK_OEM_COMMA => return b'<',
-            VK_OEM_MINUS => return b'_',
-            VK_OEM_PERIOD => return b'>',
-            VK_OEM_2 => return b'?',
-            VK_OEM_3 => return b'~',
-            VK_OEM_4 => return b'{',
-            VK_OEM_5 => return b'|',
-            VK_OEM_6 => return b'}',
-            VK_OEM_7 => return b'"',
-            _ => {}
-        }
-    } else {
-        match VIRTUAL_KEY(vk as u16) {
-            VK_OEM_1 => return b';',
-            VK_OEM_PLUS => return b'=',
-            VK_OEM_COMMA => return b',',
-            VK_OEM_MINUS => return b'-',
-            VK_OEM_PERIOD => return b'.',
-            VK_OEM_2 => return b'/',
-            VK_OEM_3 => return b'`',
-            VK_OEM_4 => return b'[',
-            VK_OEM_5 => return b'\\',
-            VK_OEM_6 => return b']',
-            VK_OEM_7 => return b'\'',
-            _ => {}
-        }
+        key_state[VK_SHIFT.0 as usize] = 0x80;
+    }
+    if caps {
+        key_state[VK_CAPITAL.0 as usize] = 0x01;
+    }
+    let mut buf = [0u16; 4];
+    let ret = ToUnicode(vk, scan_code, Some(&key_state), &mut buf, 0);
+    if ret == 1 && buf[0] > 0 && buf[0] <= 127 {
+        return buf[0] as u8;
     }
 
     0

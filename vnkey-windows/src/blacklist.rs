@@ -42,6 +42,11 @@ fn get_foreground_exe() -> Option<String> {
     }
 }
 
+/// Trả về exe name của foreground (dùng chung cho blacklist và send.rs)
+pub fn get_foreground_exe_cached() -> Option<String> {
+    get_foreground_exe()
+}
+
 pub fn get_exe_under_cursor() -> Option<String> {
     unsafe {
         let mut pt = POINT::default();

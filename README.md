@@ -42,29 +42,82 @@ cargo build --release
 
 ```bash
 # Debian/Ubuntu
-sudo dpkg -i vnkey-fcitx5_1.0.0_amd64.deb
+sudo dpkg -i vnkey-fcitx5_1.0.1_amd64.deb
 
 # Fedora/RHEL/Rocky
-sudo dnf install ./vnkey-fcitx5-1.0.0-1.x86_64.rpm
+sudo dnf install ./vnkey-fcitx5-1.0.1-1.x86_64.rpm
 
 # Arch Linux
-sudo pacman -U vnkey-fcitx5-1.0.0-1-x86_64.pkg.tar.zst
+sudo pacman -U vnkey-fcitx5-1.0.1-1-x86_64.pkg.tar.zst
 ```
-*(Đối với NixOS: có sẵn file `.tar.gz` chứa addon Fcitx5 dịch sẵn để bạn tự fetch vào derivation).*
+
+#### NixOS (Fcitx5)
+
+Thêm vào `flake.nix` của hệ thống:
+
+```nix
+{
+  inputs.vnkey.url = "github:marixdev/vnkey";
+
+  # Trong nixosConfigurations:
+  modules = [
+    ({ pkgs, ... }: {
+      i18n.inputMethod = {
+        enable = true;
+        type = "fcitx5";
+        fcitx5.addons = [
+          vnkey.packages.${pkgs.system}.vnkey-fcitx5
+        ];
+      };
+    })
+  ];
+}
+```
+
+Hoặc dùng `nix profile` (không cần NixOS):
+```bash
+nix profile install github:marixdev/vnkey#vnkey-fcitx5
+```
 
 ### Linux — IBus
 
 ```bash
 # Debian/Ubuntu
-sudo dpkg -i vnkey-ibus_1.0.0_amd64.deb
+sudo dpkg -i vnkey-ibus_1.0.1_amd64.deb
 
 # Fedora/RHEL/Rocky
-sudo dnf install ./vnkey-ibus-1.0.0-1.x86_64.rpm
+sudo dnf install ./vnkey-ibus-1.0.1-1.x86_64.rpm
 
 # Arch Linux
-sudo pacman -U vnkey-ibus-1.0.0-1-x86_64.pkg.tar.zst
+sudo pacman -U vnkey-ibus-1.0.1-1-x86_64.pkg.tar.zst
 ```
-*(Đối với NixOS: có sẵn file `.tar.gz` chứa engine IBus dịch sẵn để bạn tự fetch vào derivation).*
+
+#### NixOS (IBus)
+
+Thêm vào `flake.nix` của hệ thống:
+
+```nix
+{
+  inputs.vnkey.url = "github:marixdev/vnkey";
+
+  modules = [
+    ({ pkgs, ... }: {
+      i18n.inputMethod = {
+        enable = true;
+        type = "ibus";
+        ibus.engines = [
+          vnkey.packages.${pkgs.system}.vnkey-ibus
+        ];
+      };
+    })
+  ];
+}
+```
+
+Hoặc dùng `nix profile`:
+```bash
+nix profile install github:marixdev/vnkey#vnkey-ibus
+```
 
 ### Build từ source (Linux)
 

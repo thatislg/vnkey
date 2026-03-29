@@ -151,7 +151,7 @@ impl Engine {
     }
 
     /// Soft reset: lưu trạng thái để backspace có thể khôi phục
-    fn soft_reset(&mut self) {
+    pub fn soft_reset(&mut self) {
         self.saved_current = self.current;
         self.saved_key_current = self.key_current;
         self.saved_single_mode = self.single_mode;
@@ -236,6 +236,16 @@ impl Engine {
         }
 
         if !ret {
+            // Thử khôi phục phím gốc khi từ chuyển sang NonVn
+            if self.try_auto_restore() {
+                let output = self.write_output();
+                return ProcessResult {
+                    backspaces: self.backs,
+                    output,
+                    out_type: OutputType::Char,
+                    processed: true,
+                };
+            }
             return ProcessResult {
                 backspaces: 0,
                 output: Vec::new(),
@@ -339,6 +349,8 @@ impl Engine {
     // ============= Trợ giúp nội bộ =============
 
     fn buf(&self, idx: i32) -> &WordInfo {
+        debug_assert!(idx >= 0 && (idx as usize) < self.buffer.len(),
+            "buf index out of range: {idx}");
         &self.buffer[idx as usize]
     }
 
@@ -431,6 +443,76 @@ impl Engine {
                 self.key_current -= 1;
             }
         }
+    }
+
+    /// Khôi phục phím gốc khi từ không phải tiếng Việt (auto_non_vn_restore)
+    fn try_auto_restore(&mut self) -> bool {
+        if !self.options.auto_non_vn_restore
+            || !self.viet_key
+            || !self.options.spell_check_enabled
+        {
+            return false;
+        }
+        if self.current < 0 || self.buf(self.current).form != WordForm::NonVn {
+            return false;
+        }
+
+        // Tìm vị trí bắt đầu từ trong buffer
+        let mut word_start = self.current;
+        while word_start > 0 && self.buf(word_start - 1).form != WordForm::Empty {
+            word_start -= 1;
+        }
+
+        // Kiểm tra xem có ký tự nào đã bị biến đổi tiếng Việt không
+        let mut has_modification = false;
+        for i in word_start..self.current {
+            let entry = &self.buffer[i as usize];
+            if entry.tone != 0 {
+                has_modification = true;
+                break;
+            }
+            match entry.vn_sym {
+                VnLexiName::ar | VnLexiName::er | VnLexiName::or
+                | VnLexiName::oh | VnLexiName::uh | VnLexiName::ab
+                | VnLexiName::dd => {
+                    has_modification = true;
+                    break;
+                }
+                _ => {}
+            }
+        }
+
+        if !has_modification {
+            return false;
+        }
+
+        // Tìm vị trí bắt đầu keystroke cho từ này
+        let mut ks_start = self.key_current;
+        while ks_start > 0
+            && self.key_strokes[(ks_start - 1) as usize].ev.ch_type != CharType::WordBreak
+        {
+            ks_start -= 1;
+        }
+        let ks_count = (self.key_current - ks_start + 1) as usize;
+
+        // Số ký tự trên màn hình cần xóa (không bao gồm ký tự mới vừa thêm, bị suppress)
+        let on_screen = (self.current - word_start) as usize;
+
+        // Ghi lại buffer với phím gốc ASCII
+        self.current = word_start - 1;
+        for i in 0..ks_count {
+            self.current += 1;
+            let idx = self.current as usize;
+            let kc = self.key_strokes[(ks_start as usize) + i].ev.key_code;
+            self.buffer[idx] = WordInfo::default();
+            self.buffer[idx].form = WordForm::NonVn;
+            self.buffer[idx].key_code = kc;
+            self.buffer[idx].vn_sym = VnLexiName::NonVnChar;
+        }
+
+        self.backs = on_screen;
+        self.change_pos = word_start;
+        true
     }
 
     fn write_output(&self) -> Vec<u8> {

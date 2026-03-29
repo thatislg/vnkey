@@ -267,6 +267,17 @@ pub unsafe extern "C" fn vnkey_engine_reset(engine: *mut VnKeyEngine) {
     }
 }
 
+/// Soft reset: lưu trạng thái để backspace sau dấu cách có thể khôi phục từ đã gõ.
+/// Gọi khi xử lý phím Space thay vì reset().
+/// # Safety
+/// `engine` phải là con trỏ hợp lệ từ `vnkey_engine_new`.
+#[no_mangle]
+pub unsafe extern "C" fn vnkey_engine_soft_reset(engine: *mut VnKeyEngine) {
+    if !engine.is_null() {
+        (*engine).soft_reset();
+    }
+}
+
 /// Đặt kiểu gõ cho instance engine cụ thể.
 /// 0 = Telex, 1 = SimpleTelex, 2 = VNI, 3 = VIQR, 4 = MsVi
 /// # Safety

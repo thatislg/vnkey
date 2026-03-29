@@ -14,6 +14,7 @@
 #include <cstring>
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <sstream>
 
@@ -146,9 +147,7 @@ void VnKeyEngine::loadConfig() {
 void VnKeyEngine::saveConfig() {
     auto dir = configDir();
     if (dir.empty()) return;
-    // tạo thư mục
-    std::string cmd = "mkdir -p '" + dir + "'";
-    (void)std::system(cmd.c_str());
+    std::filesystem::create_directories(dir);
 
     auto path = configPath();
     std::ofstream f(path);
@@ -502,7 +501,7 @@ void VnKeyEngine::convertClipboard(bool toUnicode) {
     }
 }
 
-void VnKeyState::commitPreedit() {
+void VnKeyState::commitPreedit(bool soft) {
     if (!preedit_.empty()) {
         int charset = engine_->outputCharset();
         if (charset == 1) {
@@ -539,7 +538,10 @@ void VnKeyState::commitPreedit() {
             ic_->updateUserInterface(UserInterfaceComponent::InputPanel);
         }
     }
-    vnkey_engine_reset(vnkeyEngine_);
+    if (soft)
+        vnkey_engine_soft_reset(vnkeyEngine_);
+    else
+        vnkey_engine_reset(vnkeyEngine_);
 }
 
 void VnKeyState::keyEvent(KeyEvent &keyEvent) {
@@ -575,9 +577,9 @@ void VnKeyState::keyEvent(KeyEvent &keyEvent) {
         return; /* để Fcitx xử lý */
     }
 
-    /* Xử lý dấu cách: commit preedit + dấu cách */
+    /* Xử lý dấu cách: commit preedit + soft reset để backspace khôi phục */
     if (key.check(FcitxKey_space)) {
-        commitPreedit();
+        commitPreedit(true);
         return; /* để Fcitx gửi dấu cách */
     }
 

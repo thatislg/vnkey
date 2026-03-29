@@ -426,8 +426,14 @@ static void preedit_append(VnkIBusEngine *self, const uint8_t *data, size_t len)
     }
 }
 
-static void commit_preedit(VnkIBusEngine *self) {
-    if (self->preedit_len == 0) return;
+static void commit_preedit_ex(VnkIBusEngine *self, int soft) {
+    if (self->preedit_len == 0) {
+        if (soft)
+            vnkey_engine_soft_reset(self->engine);
+        else
+            vnkey_engine_reset(self->engine);
+        return;
+    }
     IBusEngine *engine = IBUS_ENGINE(self);
 
     g_message("vnkey: commit preedit '%s' (len=%zu)", self->preedit, self->preedit_len);
@@ -466,7 +472,14 @@ static void commit_preedit(VnkIBusEngine *self) {
 
     clear_preedit(self);
     ibus_engine_hide_preedit_text(engine);
-    vnkey_engine_reset(self->engine);
+    if (soft)
+        vnkey_engine_soft_reset(self->engine);
+    else
+        vnkey_engine_reset(self->engine);
+}
+
+static void commit_preedit(VnkIBusEngine *self) {
+    commit_preedit_ex(self, 0);
 }
 
 /* ==================== Danh sách thuộc tính (menu chuột phải) ==================== */
@@ -757,9 +770,9 @@ static gboolean vnk_ibus_engine_process_key_event(IBusEngine *engine,
         return FALSE;
     }
 
-    /* Dấu cách: commit preedit + cho qua */
+    /* Dấu cách: commit preedit + soft reset để backspace khôi phục */
     if (keyval == IBUS_KEY_space) {
-        commit_preedit(self);
+        commit_preedit_ex(self, 1);
         return FALSE;
     }
 
