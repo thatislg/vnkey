@@ -1,0 +1,21 @@
+#!/bin/bash
+# Pre-removal script for vnkey-ibus
+set -e
+
+log() { echo "[vnkey-ibus] $*"; }
+
+log "Removing vnkey-ibus..."
+
+# Refresh icon cache
+if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+    gtk-update-icon-cache -f /usr/share/icons/hicolor/ 2>/dev/null || true
+fi
+
+# Restart IBus to unload the engine
+if command -v ibus >/dev/null 2>&1; then
+    ibus write-cache 2>/dev/null || true
+    ibus restart 2>/dev/null || true
+fi
+
+log "Done."
+exit 0

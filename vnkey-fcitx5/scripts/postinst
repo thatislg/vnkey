@@ -1,0 +1,155 @@
+#!/bin/bash
+# Post-install script for vnkey-fcitx5
+# Automatically installs fcitx5 if missing, configures IM framework
+set -e
+
+log() { echo "[vnkey-fcitx5] $*"; }
+
+# ── Detect package manager ──
+detect_pm() {
+    if command -v apt-get >/dev/null 2>&1; then
+        PM="apt"
+    elif command -v dnf >/dev/null 2>&1; then
+        PM="dnf"
+    elif command -v yum >/dev/null 2>&1; then
+        PM="yum"
+    elif command -v pacman >/dev/null 2>&1; then
+        PM="pacman"
+    elif command -v zypper >/dev/null 2>&1; then
+        PM="zypper"
+    else
+        PM="unknown"
+    fi
+}
+
+# ── Install fcitx5 if not present ──
+install_fcitx5_if_missing() {
+    if command -v fcitx5 >/dev/null 2>&1; then
+        log "fcitx5 already installed: $(fcitx5 --version 2>/dev/null || echo 'ok')"
+        return 0
+    fi
+
+    log "fcitx5 not found — installing..."
+    detect_pm
+
+    case "$PM" in
+        apt)
+            apt-get update -qq
+            apt-get install -y --no-install-recommends \
+                fcitx5 fcitx5-frontend-gtk3 fcitx5-frontend-qt5 \
+                fcitx5-config-qt fcitx5-modules
+            ;;
+        dnf)
+            dnf install -y \
+                fcitx5 fcitx5-gtk3 fcitx5-qt5 \
+                fcitx5-configtool
+            ;;
+        yum)
+            yum install -y \
+                fcitx5 fcitx5-gtk3 fcitx5-qt5
+            ;;
+        pacman)
+            pacman -S --noconfirm --needed \
+                fcitx5 fcitx5-gtk fcitx5-qt \
+                fcitx5-configtool
+            ;;
+        zypper)
+            zypper install -y \
+                fcitx5 fcitx5-gtk3 fcitx5-qt5 \
+                fcitx5-configtool
+            ;;
+        *)
+            log "WARNING: Unknown package manager. Please install fcitx5 manually."
+            return 1
+            ;;
+    esac
+
+    if command -v fcitx5 >/dev/null 2>&1; then
+        log "fcitx5 installed successfully."
+    else
+        log "WARNING: fcitx5 installation may have failed. Please check manually."
+        return 1
+    fi
+}
+
+# ── Configure fcitx5 as default IM framework ──
+configure_im_framework() {
+    # Set environment variables for Fcitx5
+    ENVFILE="/etc/environment.d/90-vnkey-fcitx5.conf"
+    if [ -d /etc/environment.d ]; then
+        cat > "$ENVFILE" <<'EOF'
+GTK_IM_MODULE=fcitx
+QT_IM_MODULE=fcitx
+XMODIFIERS=@im=fcitx
+SDL_IM_MODULE=fcitx
+GLFW_IM_MODULE=ibus
+EOF
+        log "IM environment written to $ENVFILE"
+    fi
+
+    # Also write to /etc/profile.d for non-systemd distros
+    PROFILEFILE="/etc/profile.d/vnkey-fcitx5.sh"
+    cat > "$PROFILEFILE" <<'EOF'
+export GTK_IM_MODULE=fcitx
+export QT_IM_MODULE=fcitx
+export XMODIFIERS=@im=fcitx
+export SDL_IM_MODULE=fcitx
+export GLFW_IM_MODULE=ibus
+EOF
+    log "IM environment written to $PROFILEFILE"
+
+    # Use im-config if available (Debian/Ubuntu)
+    if command -v im-config >/dev/null 2>&1; then
+        im-config -n fcitx5 2>/dev/null || true
+        log "im-config set to fcitx5"
+    fi
+
+    # Use imsettings-switch if available (Fedora)
+    if command -v imsettings-switch >/dev/null 2>&1; then
+        imsettings-switch fcitx5 2>/dev/null || true
+        log "imsettings-switch set to fcitx5"
+    fi
+}
+
+# ── Refresh library cache (icon cache, etc.) ──
+refresh_caches() {
+    if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+        gtk-update-icon-cache -f /usr/share/icons/hicolor/ 2>/dev/null || true
+        log "Icon cache refreshed"
+    fi
+}
+
+# ── Auto-start fcitx5 via XDG autostart ──
+setup_autostart() {
+    AUTOSTART_DIR="/etc/xdg/autostart"
+    DESKTOP_FILE="$AUTOSTART_DIR/org.fcitx.Fcitx5.desktop"
+    # Only create if fcitx5's own autostart doesn't exist
+    if [ -d "$AUTOSTART_DIR" ] && [ ! -f "$DESKTOP_FILE" ]; then
+        FCITX5_BIN=$(command -v fcitx5 2>/dev/null || echo "/usr/bin/fcitx5")
+        cat > "$DESKTOP_FILE" <<EOF
+[Desktop Entry]
+Name=Fcitx 5
+GenericName=Input Method
+Comment=Start Input Method
+Exec=$FCITX5_BIN
+Icon=org.fcitx.Fcitx5
+Terminal=false
+Type=Application
+Categories=System;Utility;
+X-GNOME-Autostart-Phase=Applications
+X-GNOME-AutoRestart=false
+X-GNOME-Autostart-Notify=false
+X-KDE-autostart-after=panel
+EOF
+        log "Fcitx5 autostart desktop entry created"
+    fi
+}
+
+# ── Main ──
+log "Running post-install..."
+install_fcitx5_if_missing
+configure_im_framework
+refresh_caches
+setup_autostart
+log "Done. Please log out and log back in to activate Fcitx5 with VnKey Vietnamese."
+exit 0

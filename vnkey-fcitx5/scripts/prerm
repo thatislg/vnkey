@@ -1,0 +1,24 @@
+#!/bin/bash
+# Pre-removal script for vnkey-fcitx5
+set -e
+
+log() { echo "[vnkey-fcitx5] $*"; }
+
+log "Removing vnkey-fcitx5..."
+
+# Remove IM environment config files we created
+rm -f /etc/environment.d/90-vnkey-fcitx5.conf 2>/dev/null || true
+rm -f /etc/profile.d/vnkey-fcitx5.sh 2>/dev/null || true
+
+# Refresh icon cache
+if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+    gtk-update-icon-cache -f /usr/share/icons/hicolor/ 2>/dev/null || true
+fi
+
+# Restart fcitx5 to unload addon
+if command -v fcitx5-remote >/dev/null 2>&1; then
+    fcitx5-remote -e 2>/dev/null || true
+fi
+
+log "Done."
+exit 0
