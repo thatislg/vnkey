@@ -19,6 +19,8 @@ static LAST_FOCUS: AtomicIsize = AtomicIsize::new(0);
 static JUST_TOGGLED: AtomicBool = AtomicBool::new(false);
 /// Tick count cuối cùng hook nhận được phím (dùng để phát hiện hook bị gỡ)
 static HOOK_LAST_SEEN: AtomicU64 = AtomicU64::new(0);
+/// Thời điểm phím vật lý cuối cùng (dùng debounce focus change trong cùng cửa sổ)
+static LAST_PHYSICAL_KEY_TIME: AtomicU32 = AtomicU32::new(0);
 
 fn get_hook() -> HHOOK {
     HHOOK(HOOK_RAW.load(Ordering::Relaxed) as *mut _)
@@ -118,8 +120,24 @@ unsafe extern "system" fn ll_keyboard_proc(
         };
         let prev_focus = LAST_FOCUS.swap(focus_hwnd, Ordering::Relaxed);
 
-        let focus_changed = (fg != prev_fg && prev_fg != 0)
-            || (focus_hwnd != 0 && focus_hwnd != prev_focus);
+        // Debounce: khi đang gõ, focus element trong cùng cửa sổ có thể thay đổi
+        // tạm thời (autocomplete popup, tooltip, dropdown) — không nên reset engine.
+        // Chỉ reset khi:
+        // 1. Cửa sổ nền thay đổi (user chuyển app) — luôn reset
+        // 2. Focus element thay đổi VÀ user không gõ gần đây (>300ms) — có thể user
+        //    click vào ô khác trong cùng cửa sổ
+        let now_tick = kb.time;
+        let last_tick = LAST_PHYSICAL_KEY_TIME.swap(now_tick, Ordering::Relaxed);
+        let typing_gap = now_tick.wrapping_sub(last_tick);
+
+        let focus_changed = if fg != prev_fg && prev_fg != 0 {
+            true
+        } else if focus_hwnd != 0 && focus_hwnd != prev_focus {
+            typing_gap > 300
+        } else {
+            false
+        };
+
         if focus_changed {
             if let Ok(mut guard) = ENGINE.try_lock() {
                 if let Some(state) = guard.as_mut() {

@@ -20,6 +20,7 @@
 - Sửa phím tắt tùy chỉnh (Alt+Z, ...) gây mất focus khi đang soạn thảo — xử lý toggle trực tiếp trong LL hook thay vì RegisterHotKey
 - Thêm thông báo OSD (Tiếng Việt / English) khi chuyển chế độ bằng Ctrl+Shift mặc định
 - Cài đặt lại keyboard hook định kỳ (5s) phòng trường hợp Windows tự gỡ hook
+- Sửa lỗi gõ "đc" (viết tắt "được") thành "ddc" — debounce focus element change trong cùng cửa sổ khi đang gõ, tránh engine bị reset sai bởi autocomplete popup
 
 ### vnkey-fcitx5
 - Sửa `saveConfig` dùng `std::system("mkdir -p")` — thay bằng `std::filesystem::create_directories()`
