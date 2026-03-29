@@ -17,6 +17,8 @@
 - Sửa WPS Office hiện ký tự đôi ("chàoao") — thêm phương thức backspace riêng cho ứng dụng không hỗ trợ Shift+Left
 - Trích xuất `build_backspace_inputs()` helper giảm code trùng lặp
 - Space dùng `soft_reset` thay vì `reset` để hỗ trợ backspace khôi phục dấu
+- Sửa phím tắt tùy chỉnh (Alt+Z, ...) gây mất focus khi đang soạn thảo — xử lý toggle trực tiếp trong LL hook thay vì RegisterHotKey
+- Cài đặt lại keyboard hook định kỳ (5s) phòng trường hợp Windows tự gỡ hook
 
 ### vnkey-fcitx5
 - Sửa `saveConfig` dùng `std::system("mkdir -p")` — thay bằng `std::filesystem::create_directories()`
