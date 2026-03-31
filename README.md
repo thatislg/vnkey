@@ -4,7 +4,8 @@
 
 VnKey là bộ gõ tiếng Việt mã nguồn mở cho Linux (Fcitx5), engine viết bằng **Rust**. Tối ưu cho **Linux Mint**, Ubuntu, Debian và các bản phân phối dựa trên Debian.
 
-**Website:** [https://vnkey.app](https://vnkey.app)
+**Website:** [https://vnkey.app](https://vnkey.app)  
+**Tài liệu:** [`docs/`](docs/)
 
 ## Kiến trúc
 
@@ -22,6 +23,17 @@ vnkey-fcitx5/    (C++)     Fcitx5 addon cho Linux
 - **Kiểu mới** (oà, uý) — theo quy tắc chính tả hiện đại
 - **Chuyển đổi bảng mã clipboard** — chuyển text giữa Unicode và các bảng mã legacy
 - **Cấu hình chung** `config.json`
+
+## 📚 Tài liệu
+
+Xem thêm tài liệu chi tiết trong thư mục [`docs/`](docs/):
+
+- [`CAU_TRUC_DU_AN.md`](docs/CAU_TRUC_DU_AN.md) — Cấu trúc dự án
+- [`LICH_SU_PHAT_TRIEN.md`](docs/LICH_SU_PHAT_TRIEN.md) — Lịch sử phát triển
+- [`HUONG_DAN_BUILD.md`](docs/HUONG_DAN_BUILD.md) — Hướng dẫn build
+- [`TODO.md`](docs/TODO.md) — Kế hoạch phát triển
+
+---
 
 ## Cài đặt
 

@@ -8,6 +8,10 @@
 #ifndef VNKEY_FCITX5_H
 #define VNKEY_FCITX5_H
 
+/* Version Information */
+#define VNKEY_VERSION "1.0.1"
+#define VNKEY_BUILD_TYPE "CUSTOM"  /* Changed to "RELEASE" for official builds */
+
 #include <fcitx/addonfactory.h>
 #include <fcitx/addonmanager.h>
 #include <fcitx/inputmethodengine.h>

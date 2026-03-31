@@ -5,6 +5,7 @@
 #   ./scripts/build-linux-mint.sh          Build và tạo .deb
 #   ./scripts/build-linux-mint.sh install  Build và cài đặt ngay
 #   ./scripts/build-linux-mint.sh clean    Xóa build artifacts
+#   ./scripts/build-linux-mint.sh version  Hiển thị version info
 #
 
 set -euo pipefail
@@ -26,6 +27,36 @@ log()   { echo -e "${GREEN}[VnKey]${NC} $*"; }
 info()  { echo -e "${BLUE}[VnKey]${NC} $*"; }
 warn()  { echo -e "${YELLOW}[VnKey]${NC} $*"; }
 err()   { echo -e "${RED}[VnKey]${NC} $*" >&2; }
+
+# Generate version info
+generate_version_info() {
+    local version_file="$FCITX5_DIR/VERSION_INFO"
+    local build_date=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
+    local git_commit=$(cd "$ROOT_DIR" && git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+    local git_branch=$(cd "$ROOT_DIR" && git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
+    local build_type="CUSTOM_BUILD"
+
+    # Check if this is a tagged release
+    local git_tag=$(cd "$ROOT_DIR" && git describe --tags --exact-match 2>/dev/null || echo "")
+    if [ -n "$git_tag" ]; then
+        build_type="OFFICIAL_RELEASE"
+    fi
+
+    cat > "$version_file" << EOF
+# VnKey Version Information
+# Generated: $build_date
+
+VNKEY_VERSION=1.0.1
+VNKEY_BUILD_DATE=$build_date
+VNKEY_GIT_COMMIT=$git_commit
+VNKEY_GIT_BRANCH=$git_branch
+VNKEY_BUILD_TYPE=$build_type
+VNKEY_BUILDER=$(whoami)@$(hostname)
+EOF
+
+    log "Version info generated: $version_file"
+    cat "$version_file"
+}
 
 # Check if running on Linux Mint / Ubuntu / Debian
 check_os() {
@@ -185,8 +216,44 @@ direct_install() {
 clean() {
     log "Đang xóa build artifacts..."
     rm -rf "$BUILD_DIR"
+    rm -f "$FCITX5_DIR/VERSION_INFO"
     cd "$ENGINE_DIR" && cargo clean
     log "✓ Dọn dẹp hoàn tất."
+}
+
+# Show version info
+show_version() {
+    local version_file="$FCITX5_DIR/VERSION_INFO"
+
+    if [ -f "$version_file" ]; then
+        echo "=== VnKey Version Info ==="
+        cat "$version_file"
+        echo ""
+
+        # Check installed version
+        if dpkg -l | grep -q vnkey-fcitx5; then
+            echo "=== Installed Package ==="
+            dpkg -l | grep vnkey-fcitx5 | awk '{print "Package: "$2"\nVersion: "$3"\nArch: "$4}'
+        fi
+
+        # Check if running version matches
+        if [ -f /usr/lib/x86_64-linux-gnu/fcitx5/libvnkey.so ]; then
+            echo ""
+            echo "=== Active Library ==="
+            ls -lh /usr/lib/x86_64-linux-gnu/fcitx5/libvnkey.so
+        fi
+    else
+        warn "VERSION_INFO not found. Run build first."
+        echo ""
+
+        # Fallback: check package version
+        if dpkg -l | grep -q vnkey-fcitx5; then
+            echo "=== Installed Package ==="
+            dpkg -l | grep vnkey-fcitx5 | awk '{print "Package: "$2"\nVersion: "$3}'
+        else
+            err "VnKey not installed"
+        fi
+    fi
 }
 
 # Show usage
@@ -225,10 +292,15 @@ case "$CMD" in
         check_deps
         build_engine
         build_fcitx5
+        # Generate version info before install
+        generate_version_info
         direct_install
         ;;
     clean)
         clean
+        ;;
+    version)
+        show_version
         ;;
     "")
         check_os
@@ -237,12 +309,17 @@ case "$CMD" in
         check_deps
         build_engine
         build_fcitx5
+        # Generate version info
+        generate_version_info
         build_package
         log "Build hoàn tất! File .deb nằm trong: $BUILD_DIR"
         echo ""
         info "Để cài đặt, chạy:"
         echo "  sudo dpkg -i $BUILD_DIR/vnkey-fcitx5_*.deb"
         echo "  sudo apt install -f  # Nếu thiếu dependencies"
+        echo ""
+        info "Version info:"
+        cat "$FCITX5_DIR/VERSION_INFO"
         ;;
     *)
         usage

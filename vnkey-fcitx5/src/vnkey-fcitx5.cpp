@@ -532,11 +532,10 @@ void VnKeyState::commitPreedit(bool soft) {
             }
         }
         preedit_.clear();
-        if (ic_->capabilityFlags().test(CapabilityFlag::Preedit)) {
-            ic_->inputPanel().reset();
-            ic_->updatePreedit();
-            ic_->updateUserInterface(UserInterfaceComponent::InputPanel);
-        }
+        /* Luôn reset preedit panel để đảm bảo hiển thị đúng */
+        ic_->inputPanel().reset();
+        ic_->updatePreedit();
+        ic_->updateUserInterface(UserInterfaceComponent::InputPanel);
     }
     if (soft)
         vnkey_engine_soft_reset(vnkeyEngine_);
@@ -664,17 +663,17 @@ void VnKeyState::keyEvent(KeyEvent &keyEvent) {
                 preedit_.append(reinterpret_cast<const char *>(buf), actualLen);
             }
 
-            /* Cập nhật hiển thị preedit */
-            if (ic_->capabilityFlags().test(CapabilityFlag::Preedit)) {
-                Text preeditText;
-                preeditText.append(preedit_,
-                                   TextFormatFlag::Underline);
-                preeditText.setCursor(preedit_.size());
-                ic_->inputPanel().setClientPreedit(preeditText);
-                ic_->updatePreedit();
-                ic_->updateUserInterface(
-                    UserInterfaceComponent::InputPanel);
-            }
+            /* Cập nhật hiển thị preedit
+             * Luôn update để hỗ trợ các editor không report đúng capability flags
+             * (Zed, VSCode, một số Electron apps) */
+            Text preeditText;
+            preeditText.append(preedit_,
+                               TextFormatFlag::Underline);
+            preeditText.setCursor(preedit_.size());
+            ic_->inputPanel().setClientPreedit(preeditText);
+            ic_->updatePreedit();
+            ic_->updateUserInterface(
+                UserInterfaceComponent::InputPanel);
 
             keyEvent.filterAndAccept();
             return;
@@ -732,17 +731,17 @@ void VnKeyState::keyEvent(KeyEvent &keyEvent) {
         if (vnkey_engine_at_word_beginning(vnkeyEngine_)) {
             commitPreedit();
         } else {
-            /* Cập nhật preedit */
-            if (ic_->capabilityFlags().test(CapabilityFlag::Preedit)) {
-                Text preeditText;
-                preeditText.append(preedit_,
-                                   TextFormatFlag::Underline);
-                preeditText.setCursor(preedit_.size());
-                ic_->inputPanel().setClientPreedit(preeditText);
-                ic_->updatePreedit();
-                ic_->updateUserInterface(
-                    UserInterfaceComponent::InputPanel);
-            }
+            /* Cập nhật preedit
+             * Luôn update để hỗ trợ các editor không report đúng capability flags
+             * (Zed, VSCode, một số Electron apps) */
+            Text preeditText;
+            preeditText.append(preedit_,
+                               TextFormatFlag::Underline);
+            preeditText.setCursor(preedit_.size());
+            ic_->inputPanel().setClientPreedit(preeditText);
+            ic_->updatePreedit();
+            ic_->updateUserInterface(
+                UserInterfaceComponent::InputPanel);
         }
 
         keyEvent.filterAndAccept();
