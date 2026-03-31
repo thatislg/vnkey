@@ -12,143 +12,29 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  # ===== Windows =====
-  windows:
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            vnkey-engine/target
-            vnkey-windows/target
-          key: windows-cargo-${{ hashFiles('**/Cargo.lock') }}
-
-      - name: Build vnkey-windows
-        run: |
-          cd vnkey-windows
-          cargo build --release
-
-      - name: Sign with SignPath
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: SignPath/github-action-submit-signing-request@v1
-        with:
-          api-token: '${{ secrets.SIGNPATH_API_TOKEN }}'
-          organization-id: '${{ secrets.SIGNPATH_ORG_ID }}'
-          project-slug: 'vnkey'
-          signing-policy-slug: 'release-signing'
-          artifact-configuration-slug: 'vnkey-exe'
-          github-artifact-id: ''
-          input-artifact-path: 'vnkey-windows/target/release/vnkey.exe'
-          output-artifact-path: 'vnkey-windows/target/release/vnkey.exe'
-          wait-for-completion: true
-          wait-for-completion-timeout-in-seconds: 600
-        continue-on-error: true
-
-      - name: Scan with VirusTotal
-        uses: crazy-max/ghaction-virustotal@v4
-        with:
-          vt_api_key: ${{ secrets.VT_API_KEY }}
-          files: |
-            vnkey-windows/target/release/vnkey.exe
-        id: virustotal
-        continue-on-error: true
-
-      - name: Save VirusTotal analysis link
-        if: steps.virustotal.outputs.analysis != ''
-        run: |
-          echo "${{ steps.virustotal.outputs.analysis }}" > vnkey-windows/target/release/virustotal.txt
-
-      - name: Upload Windows artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: vnkey-windows
-          path: |
-            vnkey-windows/target/release/vnkey.exe
-            vnkey-windows/target/release/virustotal.txt
-
-  # ===== macOS (Universal: Intel + Apple Silicon) =====
-  macos:
-    runs-on: macos-14
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Rust (with both targets)
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-apple-darwin,x86_64-apple-darwin
-
-      - name: Cache cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            vnkey-engine/target
-          key: macos-cargo-${{ hashFiles('vnkey-engine/Cargo.lock') }}
-
-      - name: Build vnkey-engine (universal)
-        run: |
-          cd vnkey-engine
-          cargo build --release --target aarch64-apple-darwin
-          cargo build --release --target x86_64-apple-darwin
-          mkdir -p target/release
-          lipo -create \
-            target/aarch64-apple-darwin/release/libvnkey_engine.a \
-            target/x86_64-apple-darwin/release/libvnkey_engine.a \
-            -output target/release/libvnkey_engine.a
-
-      - name: Build VnKey.app
-        run: |
-          cd vnkey-macos
-          cmake -B build \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
-          cmake --build build --config Release
-
-      - name: Create DMG
-        run: |
-          cd vnkey-macos
-          mkdir -p dmg-stage
-          cp -R build/VnKey.app dmg-stage/
-          ln -s "/Library/Input Methods" dmg-stage/
-          hdiutil create -volname "VnKey" \
-            -srcfolder dmg-stage \
-            -ov -format UDZO \
-            build/VnKey.dmg
-
-      - name: Upload macOS artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: vnkey-macos
-          path: vnkey-macos/build/VnKey.dmg
-
-  # ===== Fcitx5 DEB — Debian 12 (fcitx5 5.0.21, glibc 2.36) =====
-  # Build trên Debian 12 để addon tương thích SONAME với fcitx5 5.0.x.
-  # Glibc compat shims hạ yêu cầu xuống glibc 2.34+ (RHEL 9 / Debian 12).
+  # ===== Fcitx5 DEB (Debian/Ubuntu/Linux Mint) =====
   fcitx5-deb:
-    runs-on: ubuntu-latest
-    container: debian:12
+    runs-on ubuntu-latest
+    container debian:12
     env:
       DEBIAN_FRONTEND: noninteractive
     steps:
       - name: Install dependencies
         run: |
           apt-get update
-          apt-get install -y git curl ca-certificates \
-            build-essential cmake pkg-config \
-            fcitx5 libfcitx5core-dev libfcitx5config-dev \
-            libfcitx5utils-dev fcitx5-modules-dev \
-            extra-cmake-modules gettext
+          apt-get install -y --no-install-recommends \
+            curl \
+            build-essential \
+            cmake \
+            fcitx5-dev \
+            libfcitx5-utils-dev \
+            libglib2.0-dev \
+            pkg-config \
+            ca-certificates
+        shell: bash
 
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -168,13 +54,7 @@ jobs:
       - name: Build vnkey-fcitx5 & package DEB
         run: |
           cd vnkey-fcitx5
-          mkdir -p build && cd build
-          cmake .. \
-            -DCMAKE_INSTALL_PREFIX=/usr \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DVNKEY_ENGINE_LIB_DIR=${GITHUB_WORKSPACE}/vnkey-engine/target/release
-          make -j$(nproc)
-          cpack -G DEB
+          bash scripts/build.sh package
 
       - name: Upload Fcitx5 DEB
         uses: actions/upload-artifact@v4
@@ -182,18 +62,25 @@ jobs:
           name: vnkey-fcitx5-deb
           path: vnkey-fcitx5/build/*.deb
 
-  # ===== Fcitx5 RPM — Fedora 41 (fcitx5 5.1.10, glibc 2.40) =====
+  # ===== Fcitx5 RPM (Fedora/RHEL) =====
   fcitx5-rpm:
-    runs-on: ubuntu-latest
-    container: fedora:41
+    runs-on ubuntu-latest
+    container fedora:41
     steps:
       - name: Install dependencies
         run: |
-          dnf install -y git curl cmake gcc-c++ make pkg-config \
-            fcitx5-devel extra-cmake-modules gettext rpm-build \
-            libstdc++-static
+          dnf install -y \
+            curl \
+            gcc \
+            gcc-c++ \
+            cmake \
+            fcitx5-devel \
+            glib2-devel \
+            pkg-config
+        shell: bash
 
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -213,13 +100,7 @@ jobs:
       - name: Build vnkey-fcitx5 & package RPM
         run: |
           cd vnkey-fcitx5
-          mkdir -p build && cd build
-          cmake .. \
-            -DCMAKE_INSTALL_PREFIX=/usr \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DVNKEY_ENGINE_LIB_DIR=${GITHUB_WORKSPACE}/vnkey-engine/target/release
-          make -j$(nproc)
-          cpack -G RPM
+          bash scripts/build.sh package
 
       - name: Upload Fcitx5 RPM
         uses: actions/upload-artifact@v4
@@ -227,110 +108,23 @@ jobs:
           name: vnkey-fcitx5-rpm
           path: vnkey-fcitx5/build/*.rpm
 
-  # ===== IBus DEB — Debian 12 =====
-  ibus-deb:
-    runs-on: ubuntu-latest
-    container: debian:12
-    env:
-      DEBIAN_FRONTEND: noninteractive
-    steps:
-      - name: Install dependencies
-        run: |
-          apt-get update
-          apt-get install -y git curl ca-certificates \
-            build-essential cmake pkg-config \
-            libibus-1.0-dev libglib2.0-dev
-
-      - uses: actions/checkout@v4
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            vnkey-engine/target
-          key: deb-ibus-cargo-${{ hashFiles('vnkey-engine/Cargo.lock') }}
-
-      - name: Build vnkey-engine
-        run: cd vnkey-engine && cargo build --release
-
-      - name: Build vnkey-ibus & package DEB
-        run: |
-          cd vnkey-ibus
-          mkdir -p build && cd build
-          cmake .. \
-            -DCMAKE_INSTALL_PREFIX=/usr \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DVNKEY_ENGINE_LIB_DIR=${GITHUB_WORKSPACE}/vnkey-engine/target/release
-          make -j$(nproc)
-          cpack -G DEB
-
-      - name: Upload IBus DEB
-        uses: actions/upload-artifact@v4
-        with:
-          name: vnkey-ibus-deb
-          path: vnkey-ibus/build/*.deb
-
-  # ===== IBus RPM — Fedora 41 =====
-  ibus-rpm:
-    runs-on: ubuntu-latest
-    container: fedora:41
-    steps:
-      - name: Install dependencies
-        run: |
-          dnf install -y git curl cmake gcc make pkg-config \
-            ibus-devel glib2-devel rpm-build
-
-      - uses: actions/checkout@v4
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            vnkey-engine/target
-          key: rpm-ibus-cargo-${{ hashFiles('vnkey-engine/Cargo.lock') }}
-
-      - name: Build vnkey-engine
-        run: cd vnkey-engine && cargo build --release
-
-      - name: Build vnkey-ibus & package RPM
-        run: |
-          cd vnkey-ibus
-          mkdir -p build && cd build
-          cmake .. \
-            -DCMAKE_INSTALL_PREFIX=/usr \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DVNKEY_ENGINE_LIB_DIR=${GITHUB_WORKSPACE}/vnkey-engine/target/release
-          make -j$(nproc)
-          cpack -G RPM
-
-      - name: Upload IBus RPM
-        uses: actions/upload-artifact@v4
-        with:
-          name: vnkey-ibus-rpm
-          path: vnkey-ibus/build/*.rpm
-
-  # ===== Arch Linux (Fcitx5 + IBus) =====
+  # ===== Arch Linux =====
   arch:
-    runs-on: ubuntu-latest
-    container: archlinux:latest
+    runs-on ubuntu-latest
+    container archlinux:latest
     steps:
       - name: Install dependencies
         run: |
-          pacman -Syu --noconfirm
-          pacman -S --noconfirm base-devel git cmake rust \
-            fcitx5 ibus extra-cmake-modules pkg-config zstd
+          pacman -Syu --noconfirm \
+            base-devel \
+            cmake \
+            fcitx5 \
+            glib2 \
+            curl
+        shell: bash
 
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
       - name: Build vnkey-engine
         run: cd vnkey-engine && cargo build --release
@@ -338,60 +132,7 @@ jobs:
       - name: Build & package vnkey-fcitx5
         run: |
           cd vnkey-fcitx5
-          mkdir -p build && cd build
-          cmake .. \
-            -DCMAKE_INSTALL_PREFIX=/usr \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DVNKEY_ENGINE_LIB_DIR=${GITHUB_WORKSPACE}/vnkey-engine/target/release
-          make -j$(nproc)
-          make install DESTDIR=${GITHUB_WORKSPACE}/fcitx5-pkg
-
-          cd ${GITHUB_WORKSPACE}/fcitx5-pkg
-          _size=$(du -sb --exclude=.PKGINFO . | tail -1 | cut -f1)
-          cat > .PKGINFO << EOF
-          pkgname = vnkey-fcitx5
-          pkgbase = vnkey-fcitx5
-          pkgver = ${{ github.ref_name || '1.0.1' }}-1
-          pkgdesc = VnKey Vietnamese Input Method for Fcitx5
-          url = https://github.com/marixdev/vnkey
-          builddate = $(date +%s)
-          packager = GitHub Actions <hi@vnkey.app>
-          size = ${_size}
-          arch = x86_64
-          license = GPL-3.0-or-later
-          depend = fcitx5
-          EOF
-          tar -cf ${GITHUB_WORKSPACE}/vnkey-fcitx5-${{ github.ref_name || '1.0.1' }}-1-x86_64.pkg.tar.zst \
-            --zstd .PKGINFO usr/
-
-      - name: Build & package vnkey-ibus
-        run: |
-          cd vnkey-ibus
-          mkdir -p build && cd build
-          cmake .. \
-            -DCMAKE_INSTALL_PREFIX=/usr \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DVNKEY_ENGINE_LIB_DIR=${GITHUB_WORKSPACE}/vnkey-engine/target/release
-          make -j$(nproc)
-          make install DESTDIR=${GITHUB_WORKSPACE}/ibus-pkg
-
-          cd ${GITHUB_WORKSPACE}/ibus-pkg
-          _size=$(du -sb --exclude=.PKGINFO . | tail -1 | cut -f1)
-          cat > .PKGINFO << EOF
-          pkgname = vnkey-ibus
-          pkgbase = vnkey-ibus
-          pkgver = ${{ github.ref_name || '1.0.1' }}-1
-          pkgdesc = VnKey Vietnamese Input Method for IBus
-          url = https://github.com/marixdev/vnkey
-          builddate = $(date +%s)
-          packager = GitHub Actions <hi@vnkey.app>
-          size = ${_size}
-          arch = x86_64
-          license = GPL-3.0-or-later
-          depend = ibus
-          EOF
-          tar -cf ${GITHUB_WORKSPACE}/vnkey-ibus-${{ github.ref_name || '1.0.1' }}-1-x86_64.pkg.tar.zst \
-            --zstd .PKGINFO usr/
+          bash scripts/build.sh package
 
       - name: Upload Fcitx5 Arch package
         uses: actions/upload-artifact@v4
@@ -399,77 +140,14 @@ jobs:
           name: vnkey-fcitx5-arch
           path: vnkey-fcitx5-*.pkg.tar.zst
 
-      - name: Upload IBus Arch package
-        uses: actions/upload-artifact@v4
-        with:
-          name: vnkey-ibus-arch
-          path: vnkey-ibus-*.pkg.tar.zst
-
-  # ===== NixOS (Fcitx5 + IBus) =====
-  nixos:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Nix
-        uses: cachix/install-nix-action@v30
-        with:
-          nix_path: nixpkgs=channel:nixos-unstable
-
-      - name: Build vnkey-fcitx5 & vnkey-ibus
-        run: |
-          nix-shell -p rustc cargo cmake pkg-config gnumake gcc \
-            fcitx5 ibus glib extra-cmake-modules \
-            --run '
-              set -e
-              cd vnkey-engine && cargo build --release && cd ..
-
-              # Fcitx5
-              cd vnkey-fcitx5
-              mkdir -p build && cd build
-              cmake .. \
-                -DCMAKE_INSTALL_PREFIX=/usr \
-                -DCMAKE_BUILD_TYPE=Release \
-                -DVNKEY_ENGINE_LIB_DIR=${GITHUB_WORKSPACE}/vnkey-engine/target/release
-              make -j$(nproc)
-              make install DESTDIR=${GITHUB_WORKSPACE}/nix-fcitx5-pkg
-              cd ${GITHUB_WORKSPACE}
-
-              # IBus
-              cd vnkey-ibus
-              mkdir -p build && cd build
-              cmake .. \
-                -DCMAKE_INSTALL_PREFIX=/usr \
-                -DCMAKE_BUILD_TYPE=Release \
-                -DVNKEY_ENGINE_LIB_DIR=${GITHUB_WORKSPACE}/vnkey-engine/target/release
-              make -j$(nproc)
-              make install DESTDIR=${GITHUB_WORKSPACE}/nix-ibus-pkg
-              cd ${GITHUB_WORKSPACE}
-            '
-
-          # Đóng gói tarball
-          tar -czf vnkey-fcitx5-${{ github.ref_name || '1.0.1' }}-nixos-x86_64.tar.gz -C nix-fcitx5-pkg usr/
-          tar -czf vnkey-ibus-${{ github.ref_name || '1.0.1' }}-nixos-x86_64.tar.gz -C nix-ibus-pkg usr/
-
-      - name: Upload Fcitx5 NixOS package
-        uses: actions/upload-artifact@v4
-        with:
-          name: vnkey-fcitx5-nixos
-          path: vnkey-fcitx5-*-nixos-*.tar.gz
-
-      - name: Upload IBus NixOS package
-        uses: actions/upload-artifact@v4
-        with:
-          name: vnkey-ibus-nixos
-          path: vnkey-ibus-*-nixos-*.tar.gz
-
-  # ===== Create GitHub Release =====
+  # ===== Release =====
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [windows, macos, fcitx5-deb, fcitx5-rpm, ibus-deb, ibus-rpm, arch, nixos]
+    needs: [fcitx5-deb, fcitx5-rpm, arch]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -478,46 +156,34 @@ jobs:
 
       - name: Collect release files
         run: |
-          mkdir release
-          cp artifacts/vnkey-windows/vnkey.exe release/
-          cp artifacts/vnkey-windows/virustotal.txt release/ 2>/dev/null || true
-          cp artifacts/vnkey-macos/VnKey.dmg release/ || true
-          cp artifacts/vnkey-fcitx5-deb/*.deb release/ || true
-          cp artifacts/vnkey-fcitx5-rpm/*.rpm release/ || true
-          cp artifacts/vnkey-fcitx5-arch/*.pkg.tar.zst release/ || true
-          cp artifacts/vnkey-ibus-deb/*.deb release/ || true
-          cp artifacts/vnkey-ibus-rpm/*.rpm release/ || true
-          cp artifacts/vnkey-ibus-arch/*.pkg.tar.zst release/ || true
-          cp artifacts/vnkey-fcitx5-nixos/*.tar.gz release/ || true
-          cp artifacts/vnkey-ibus-nixos/*.tar.gz release/ || true
-          ls -lh release/
+          mkdir -p release
+          cp artifacts/vnkey-fcitx5-deb/*.deb release/
+          cp artifacts/vnkey-fcitx5-rpm/*.rpm release/
+          cp artifacts/vnkey-fcitx5-arch/*.pkg.tar.zst release/
+        shell: bash
 
       - name: Generate SHA256 checksums
         run: |
           cd release
-          sha256sum * > SHA256SUMS.txt
-          cat SHA256SUMS.txt
+          sha256sum *.deb *.rpm *.pkg.tar.zst > SHA256SUMS
+        shell: bash
 
       - name: Extract changelog
         id: changelog
         run: |
-          # Lấy nội dung phiên bản hiện tại từ CHANGELOG.md
-          awk '/^## /{if(found)exit; found=1; next} found' CHANGELOG.md > /tmp/release_body.md
-
-          # Thêm VirusTotal link nếu có
-          if [ -f release/virustotal.txt ]; then
-            echo "" >> /tmp/release_body.md
-            echo "### VirusTotal" >> /tmp/release_body.md
-            echo "" >> /tmp/release_body.md
-            while IFS= read -r line; do
-              echo "- $line" >> /tmp/release_body.md
-            done < release/virustotal.txt
-          fi
-
-          cat /tmp/release_body.md
+          VERSION=${GITHUB_REF#refs/tags/v}
+          awk -v ver="$VERSION" '
+            /^## \[v/ {
+              if (p) exit
+              if ($0 ~ ver) p=1
+            }
+            p { print }
+          ' CHANGELOG.md > /tmp/release_body.md
+        shell: bash
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           files: release/*
           body_path: /tmp/release_body.md
+          prerelease: ${{ contains(github.ref, '-') }}

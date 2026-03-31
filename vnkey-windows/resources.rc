@@ -1,6 +1,0 @@
-// App icon (resource ID 1 = default app icon)
-1 ICON "v.ico"
-// Vietnamese mode icon
-101 ICON "v.ico"
-// English mode icon
-102 ICON "e.ico"
